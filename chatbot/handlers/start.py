@@ -10,3 +10,4 @@ def main_menu():
         ],
         "input_enabled": False,
     }
+

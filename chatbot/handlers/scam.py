@@ -5,3 +5,4 @@ def scam_info():
         "input_enabled": False,
     }
 
+

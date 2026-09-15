@@ -4,4 +4,3 @@ sqlalchemy==2.0.36
 python-multipart==0.0.17
 pydantic[email]==2.10.3
 pydantic-settings==2.6.1
-

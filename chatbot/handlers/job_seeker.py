@@ -22,3 +22,4 @@ def confirm_submission(email: str):
         "buttons": [{"id": "main_menu", "label": "Main Menu"}],
         "input_enabled": False,
     }
+

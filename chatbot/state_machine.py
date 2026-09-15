@@ -79,7 +79,6 @@ def handle_message(session, message=None, action_id=None):
 
         session.metadata["job_title"] = message
         session.state = State.EMPLOYER_MENU
-        
         return employer.confirm_job_post(message)
 
     # 🔹 SEARCH CANDIDATES

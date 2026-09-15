@@ -8,7 +8,6 @@ class State(str, Enum):
 
     JOB_SEEKER_MENU = "JOB_SEEKER_MENU"
     WAITING_FOR_EMAIL = "WAITING_FOR_EMAIL"
-    
 
     EMPLOYER_MENU = "EMPLOYER_MENU"
     POST_JOB = "POST_JOB"

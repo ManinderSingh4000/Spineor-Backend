@@ -9,7 +9,6 @@ def employer_menu():
         "input_enabled": False,
     }
 
-
 def ask_job_title():
     return {
         "reply": "Please enter the job title for the new post.",
