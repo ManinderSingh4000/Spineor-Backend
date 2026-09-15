@@ -4,3 +4,5 @@ def scam_info():
         "buttons": [{"id": "main_menu", "label": "Main Menu"}],
         "input_enabled": False,
     }
+
+

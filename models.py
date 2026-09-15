@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+
 from database import Base
 
 
@@ -25,6 +26,7 @@ class Candidate(Base):
     state: Mapped[str] = mapped_column(String(120), nullable=False)
     city: Mapped[str] = mapped_column(String(120), nullable=False)
     source: Mapped[str] = mapped_column(String(40), nullable=False)
+    
     consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     resume_path: Mapped[str] = mapped_column(String(512), nullable=False)
     resume_original_name: Mapped[str] = mapped_column(String(255), nullable=False)

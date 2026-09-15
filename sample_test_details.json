@@ -45,4 +45,6 @@
     "whatsapp": "10 digits, Indian mobile starting with 6–9",
     "skills": "Form field skills: JSON array string, e.g. [\"Python\",\"React\"], or comma-separated text (e.g. Python, React) for manual/curl tests. Must not be empty."
   }
+  
 }
+

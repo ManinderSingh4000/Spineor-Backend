@@ -8,6 +8,7 @@ def job_seeker_menu():
         "input_enabled": False,
     }
 
+
 def ask_email():
     return {
         "reply": "Please enter your email address to proceed.",
@@ -21,3 +22,4 @@ def confirm_submission(email: str):
         "buttons": [{"id": "main_menu", "label": "Main Menu"}],
         "input_enabled": False,
     }
+

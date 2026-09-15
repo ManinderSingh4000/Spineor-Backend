@@ -1,3 +1,4 @@
+
 def main_menu():
     return {
         "reply": "Welcome to the Job Portal Chatbot. How can I assist you today?",
@@ -9,3 +10,4 @@ def main_menu():
         ],
         "input_enabled": False,
     }
+
