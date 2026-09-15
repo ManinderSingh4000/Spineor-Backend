@@ -9,3 +9,4 @@ uploads/
 /backend/__pycache__/
 
 /chatbot/__pycache__/
+tmp/
