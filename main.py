@@ -1,26 +1,33 @@
 import json
+import logging
 import re
 import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from config import settings
 from database import get_db, init_db
+from job_applications import ENDPOINT_PATH, ApplicationError, error_payload
+from job_applications import router as job_applications_router
 from models import Candidate
-
-
 
 from chatbot.schemas import ChatRequest, ChatResponse
 from chatbot.session import get_or_create_session
 from chatbot.state_machine import handle_message
 
-ALLOWED_GENDER = {"Male", "Female", "Other"}
-ALLOWED_EXPERIENCE = {"Fresher", "0-1", "1-3", "3+"}
-ALLOWED_SOURCE = {"LinkedIn", "Referral", "Website", "Other"}
+# Typed as Literal so Swagger renders a dropdown and FastAPI rejects other values.
+Gender = Literal["Male", "Female", "Other"]
+Experience = Literal["Fresher", "0-1", "1-3", "3+"]
+Source = Literal["LinkedIn", "Referral", "Website", "Other"]
 WHATSAPP_RE = re.compile(r"^[6-9]\d{9}$")
 CTC_RE = re.compile(r"^\d+(\.\d{1,2})?$")
 
@@ -92,56 +99,134 @@ class CandidateCreated(BaseModel):
     message: str = "Application received"
 
 
-app = FastAPI(title="Candidate intake API", version="1.0.0")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+log = logging.getLogger("app")
 
+APP_VERSION = "1.1.0"
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    settings.temp_upload_dir.mkdir(parents=True, exist_ok=True)
+    # Legacy /api/candidates needs a writable dir + SQLite; on a read-only serverless
+    # filesystem (Vercel) these fail, but the job-application route must still boot.
+    try:
+        settings.upload_dir.mkdir(parents=True, exist_ok=True)
+        init_db()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Legacy candidate storage unavailable (%s); /api/candidates will fail", exc)
+    if not settings.smtp_configured:
+        log.warning("SMTP_HOST not set — POST %s will return 502 until it is configured", ENDPOINT_PATH)
+    yield
+
+
+app = FastAPI(title="Spineor backend API", version=APP_VERSION, lifespan=lifespan)
+
+# Union of the legacy origins and the job-application origins (BACKEND_PLAN.md §9).
+_origins = list(dict.fromkeys(
+    settings.split_csv(settings.cors_origins) + settings.split_csv(settings.cors_allowed_origins)
+))
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept"],
 )
 
+app.include_router(job_applications_router)
 
-@app.on_event("startup")
-def startup():
-    settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    init_db()
+
+# --- error contract for /api/v1/job-applications (BACKEND_PLAN.md §6) ---
+
+def _is_job_application(request: Request) -> bool:
+    return request.url.path.rstrip("/") == ENDPOINT_PATH
+
+
+@app.exception_handler(ApplicationError)
+async def application_error_handler(_: Request, exc: ApplicationError):
+    return JSONResponse(status_code=exc.status_code, content=error_payload(exc.message, exc.errors))
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    if not _is_job_application(request):
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    errors: dict[str, str] = {}
+    for err in exc.errors():
+        loc = [str(p) for p in err.get("loc", []) if p != "body"]
+        errors[loc[-1] if loc else "request"] = "Invalid value."
+    return JSONResponse(
+        status_code=422,
+        content=error_payload("Please correct the highlighted fields.", errors or None),
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_error_handler(request: Request, exc: Exception):
+    log.exception("Unhandled error on %s %s", request.method, request.url.path)
+    if _is_job_application(request):
+        return JSONResponse(
+            status_code=500,
+            content=error_payload(
+                "We could not submit your application right now. Please try again later."
+            ),
+        )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+# --- health ---
+
+def _health_body() -> dict:
+    return {
+        "status": "ok",
+        "service": "spineor-backend",
+        "version": APP_VERSION,
+        "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "email_configured": settings.smtp_configured,
+    }
+
+
+@app.get("/health")
+def health():
+    return _health_body()
 
 
 @app.get("/api/health")
-def health():
-    return {"status": "ok"}
+def api_health():
+    return _health_body()
 
 
 @app.post("/api/candidates", response_model=CandidateCreated)
 async def create_candidate(
-    firstName: str = Form(...),
-    lastName: str = Form(...),
-    email: EmailStr = Form(...),
-    whatsapp: str = Form(...),
-    gender: str = Form(...),
-    industry: str = Form(...),
-    experience: str = Form(...),
-    state: str = Form(...),
-    city: str = Form(...),
-    source: str = Form(...),
-    consent: str = Form(...),
-    skills: str = Form(...),
-    college: str | None = Form(None),
-    currentCompany: str | None = Form(None),
-    currentCTC: str | None = Form(None),
-    resumeFile: UploadFile = File(...),
+    firstName: str = Form(..., min_length=1, max_length=120, examples=["Aarav"]),
+    lastName: str = Form(..., min_length=1, max_length=120, examples=["Sharma"]),
+    email: EmailStr = Form(..., examples=["aarav.sharma@example.com"]),
+    whatsapp: str = Form(
+        ..., description="10-digit Indian mobile number starting with 6-9", examples=["9876543210"]
+    ),
+    gender: Gender = Form(...),
+    industry: str = Form(..., min_length=1, max_length=255, examples=["IT & Software"]),
+    experience: Experience = Form(..., description="Years of experience. 'Fresher' requires college."),
+    state: str = Form(..., min_length=1, max_length=120, examples=["Karnataka"]),
+    city: str = Form(..., min_length=1, max_length=120, examples=["Bengaluru"]),
+    source: Source = Form(..., description="How the candidate heard about us"),
+    consent: bool = Form(..., description="Must be true"),
+    skills: str = Form(
+        ...,
+        description='JSON array or comma-separated list, e.g. ["Python","React"] or Python, React',
+        examples=["Python, React, SQL"],
+    ),
+    college: str | None = Form(None, max_length=255, description="Required when experience is Fresher"),
+    currentCompany: str | None = Form(None, max_length=255),
+    currentCTC: str | None = Form(None, description="Numbers only, in lakhs, e.g. 8.5", examples=["8.5"]),
+    resumeFile: UploadFile = File(..., description="PDF only, max 5 MB"),
     db: Session = Depends(get_db),
 ):
-    if gender not in ALLOWED_GENDER:
-        raise HTTPException(status_code=422, detail="Invalid gender")
-    if experience not in ALLOWED_EXPERIENCE:
-        raise HTTPException(status_code=422, detail="Invalid experience")
-    if source not in ALLOWED_SOURCE:
-        raise HTTPException(status_code=422, detail="Invalid source")
-    consent_lower = (consent or "").lower()
-    if consent_lower not in ("true", "1", "yes", "on"):
+    if not consent:
         raise HTTPException(status_code=422, detail="consent must be accepted")
 
     wa = _validate_whatsapp(whatsapp)
