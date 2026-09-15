@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+candidates.db
+uploads/
+
+/backend/__pycache__/
+
+/chatbot/__pycache__/

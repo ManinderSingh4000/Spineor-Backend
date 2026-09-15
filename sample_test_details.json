@@ -1,0 +1,49 @@
+{
+  "_comment": "Sample values for POST /api/candidates (multipart form). Use submit_sample_request.py or build FormData/curl from these fields.",
+  "samples": {
+    "experienced_candidate": {
+      "firstName": "Aarav",
+      "lastName": "Sharma",
+      "email": "aarav.sharma.sample@example.com",
+      "whatsapp": "9876543210",
+      "gender": "Male",
+      "industry": "IT & Software",
+      "experience": "1-3",
+      "college": "",
+      "currentCompany": "Sample Tech Pvt Ltd",
+      "currentCTC": "12.5",
+      "skills": ["Python", "React", "SQL"],
+      "state": "Karnataka",
+      "city": "Bengaluru",
+      "source": "Website",
+      "consent": true,
+      "resumeFile": "Attach any .pdf file under 5 MB (script embeds a tiny PDF)."
+    },
+    "fresher_candidate": {
+      "firstName": "Priya",
+      "lastName": "Nair",
+      "email": "priya.nair.sample@example.com",
+      "whatsapp": "8123456789",
+      "gender": "Female",
+      "industry": "Consulting",
+      "experience": "Fresher",
+      "college": "Indian Institute of Sample Science",
+      "currentCompany": "",
+      "currentCTC": "",
+      "skills": ["Excel", "Communication"],
+      "state": "Maharashtra",
+      "city": "Mumbai",
+      "source": "LinkedIn",
+      "consent": true,
+      "resumeFile": "Attach any .pdf file under 5 MB."
+    }
+  },
+  "allowed_values": {
+    "gender": ["Male", "Female", "Other"],
+    "experience": ["Fresher", "0-1", "1-3", "3+"],
+    "source": ["LinkedIn", "Referral", "Website", "Other"],
+    "whatsapp": "10 digits, Indian mobile starting with 6–9",
+    "skills": "Form field skills: JSON array string, e.g. [\"Python\",\"React\"], or comma-separated text (e.g. Python, React) for manual/curl tests. Must not be empty."
+  }
+  
+}
