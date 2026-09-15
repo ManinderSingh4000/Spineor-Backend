@@ -190,12 +190,13 @@ def _health_body() -> dict:
     }
 
 
-@app.get("/health")
+# GET + HEAD: uptime monitors (UptimeRobot, Render health checks) often send HEAD.
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return _health_body()
 
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 def api_health():
     return _health_body()
 
