@@ -1,10 +1,19 @@
-"""SMTP delivery of job applications to HR (BACKEND_PLAN.md §5). Stdlib only."""
+"""Delivery of job applications to HR (BACKEND_PLAN.md §5). Stdlib only.
 
+Providers (EMAIL_PROVIDER): "smtp" for local dev, "brevo" or "resend" for production —
+Render and most PaaS hosts block outbound SMTP ports, but HTTPS (443) always works.
+"""
+
+import base64
 import html
+import json
 import logging
 import smtplib
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from email.message import EmailMessage
+from email.utils import parseaddr
 from pathlib import Path
 
 from config import settings
@@ -106,11 +115,73 @@ def build_message(a: ApplicationEmail) -> EmailMessage:
     return msg
 
 
-def send_application(a: ApplicationEmail) -> None:
-    """Send synchronously; raises EmailDeliveryError on any SMTP problem."""
-    if not settings.smtp_configured:
-        raise EmailDeliveryError("SMTP is not configured (SMTP_HOST / HR_EMAIL missing)")
+def _subject(a: ApplicationEmail) -> str:
+    return f"Job Application: {a.job_title} (#{a.job_id}) - {a.first_name} {a.last_name}"
 
+
+def _from_parts() -> tuple[str, str]:
+    name, addr = parseaddr(settings.email_from)
+    return name or "Spineor Careers", addr or settings.email_from
+
+
+def _attachment_b64(a: ApplicationEmail) -> str:
+    return base64.b64encode(a.resume_path.read_bytes()).decode("ascii")
+
+
+def _http_post(url: str, headers: dict[str, str], payload: dict) -> None:
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json", **headers},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=settings.email_http_timeout_seconds) as resp:
+            if resp.status >= 300:
+                raise EmailDeliveryError(f"HTTP {resp.status}")
+    except urllib.error.HTTPError as exc:
+        body = exc.read(500).decode("utf-8", "replace")
+        raise EmailDeliveryError(f"HTTP {exc.code}: {body}") from exc
+    except (urllib.error.URLError, OSError) as exc:
+        raise EmailDeliveryError(str(exc)) from exc
+
+
+def _send_brevo(a: ApplicationEmail) -> None:
+    name, addr = _from_parts()
+    _http_post(
+        "https://api.brevo.com/v3/smtp/email",
+        {"api-key": settings.brevo_api_key},
+        {
+            "sender": {"name": name, "email": addr},
+            "to": [{"email": settings.hr_email}],
+            "replyTo": {"email": a.email, "name": f"{a.first_name} {a.last_name}"},
+            "subject": _subject(a),
+            "htmlContent": _html_body(a),
+            "textContent": _text_body(a),
+            "attachment": [{"name": a.resume_attachment_name, "content": _attachment_b64(a)}],
+            "headers": {"X-Application-Id": a.application_id},
+        },
+    )
+
+
+def _send_resend(a: ApplicationEmail) -> None:
+    _http_post(
+        "https://api.resend.com/emails",
+        {"Authorization": f"Bearer {settings.resend_api_key}"},
+        {
+            "from": settings.email_from,
+            "to": [settings.hr_email],
+            "reply_to": a.email,
+            "subject": _subject(a),
+            "html": _html_body(a),
+            "text": _text_body(a),
+            "attachments": [{"filename": a.resume_attachment_name, "content": _attachment_b64(a)}],
+            "headers": {"X-Application-Id": a.application_id},
+        },
+    )
+
+
+def _send_smtp(a: ApplicationEmail) -> None:
     msg = build_message(a)
     try:
         if settings.smtp_secure:
@@ -133,6 +204,22 @@ def send_application(a: ApplicationEmail) -> None:
                 server.login(settings.smtp_user, settings.smtp_password)
             server.send_message(msg)
     except (smtplib.SMTPException, OSError) as exc:
-        # Log the real reason server-side; the API returns a generic message.
-        log.error("SMTP delivery failed for %s: %s", a.application_id, exc)
         raise EmailDeliveryError(str(exc)) from exc
+
+
+_PROVIDERS = {"smtp": _send_smtp, "brevo": _send_brevo, "resend": _send_resend}
+
+
+def send_application(a: ApplicationEmail) -> None:
+    """Send synchronously via EMAIL_PROVIDER; raises EmailDeliveryError on any failure."""
+    provider = settings.email_provider.lower()
+    if provider not in _PROVIDERS:
+        raise EmailDeliveryError(f"Unknown EMAIL_PROVIDER '{settings.email_provider}'")
+    if not settings.email_configured:
+        raise EmailDeliveryError(f"Email provider '{provider}' is not configured")
+    try:
+        _PROVIDERS[provider](a)
+    except EmailDeliveryError as exc:
+        # Log the real reason server-side; the API returns a generic message.
+        log.error("%s delivery failed for %s: %s", provider, a.application_id, exc)
+        raise

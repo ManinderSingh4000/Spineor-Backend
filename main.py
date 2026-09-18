@@ -118,8 +118,11 @@ async def lifespan(_: FastAPI):
         init_db()
     except Exception as exc:  # noqa: BLE001
         log.warning("Legacy candidate storage unavailable (%s); /api/candidates will fail", exc)
-    if not settings.smtp_configured:
-        log.warning("SMTP_HOST not set — POST %s will return 502 until it is configured", ENDPOINT_PATH)
+    if not settings.email_configured:
+        log.warning(
+            "Email provider '%s' not configured — POST %s will return 502 until it is",
+            settings.email_provider, ENDPOINT_PATH,
+        )
     yield
 
 
@@ -186,7 +189,8 @@ def _health_body() -> dict:
         "service": "spineor-backend",
         "version": APP_VERSION,
         "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "email_configured": settings.smtp_configured,
+        "email_configured": settings.email_configured,
+        "email_provider": settings.email_provider,
     }
 
 
