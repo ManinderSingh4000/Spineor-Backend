@@ -15,6 +15,13 @@ class Settings(BaseSettings):
 
     # --- /api/v1/job-applications (see BACKEND_PLAN.md §8) ---
     hr_email: str = "hrd@spineor.com"
+    # "smtp" (local dev) | "brevo" | "resend". Render/most PaaS block outbound SMTP
+    # ports 25/465/587, so production must use an HTTPS provider.
+    email_provider: str = "smtp"
+    brevo_api_key: str = ""
+    resend_api_key: str = ""
+    email_http_timeout_seconds: int = 30
+
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
@@ -45,8 +52,15 @@ class Settings(BaseSettings):
     jobs_json: str = ""
 
     @property
-    def smtp_configured(self) -> bool:
-        return bool(self.smtp_host and self.hr_email)
+    def email_configured(self) -> bool:
+        if not self.hr_email:
+            return False
+        p = self.email_provider.lower()
+        if p == "brevo":
+            return bool(self.brevo_api_key)
+        if p == "resend":
+            return bool(self.resend_api_key)
+        return bool(self.smtp_host)
 
     @staticmethod
     def split_csv(raw: str) -> list[str]:
